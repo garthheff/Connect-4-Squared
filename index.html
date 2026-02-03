@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connect 4 of Connect 4</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="fxCanvas"></canvas>
+
+  <div class="resultBanner" id="resultBanner">
+    <div class="resultText" id="resultText">YOU WIN</div>
+  </div>
+
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="status" id="status">Your turn</div>
+        <div class="sub">
+          Meta grid has gravity. Only bottom row is playable at first.
+          Win a mini board to claim the meta tile and unlock the tile above it.
+          Draw resets the mini board.
+        </div>
+      </div>
+      <button id="reset">Reset</button>
+    </div>
+
+    <div class="panel" id="panel">
+      <div class="meta" id="meta"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modalTop">
+        <div>
+          <div class="modalTitle" id="modalTitle">Mini board</div>
+          <div class="modalSub" id="modalSub">Choose a column</div>
+        </div>
+        <button id="closeOverlay">Close</button>
+      </div>
+      <div class="bigBoard" id="bigBoard"></div>
+      <div class="footerHelp">
+        <div>Click a column to drop</div>
+        <div>Press Escape to close</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
