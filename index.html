@@ -23,13 +23,37 @@
           Draw resets the mini board.
         </div>
       </div>
-      <button id="reset">Reset</button>
+      <div class="controls">
+        <label for="difficulty">Computer</label>
+        <select id="difficulty">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+        <button id="reset">New game</button>
+        <button id="online">Online friend</button>
+      </div>
     </div>
 
     <div class="panel" id="panel">
       <div class="meta" id="meta"></div>
     </div>
   </div>
+
+  <dialog id="connectionDialog">
+    <h2>Play a friend online</h2>
+    <p>Create an invite link and send it to your friend. They open it and send their reply code back. Paste that reply here to connect.</p>
+    <button id="hostOnline">Create invite link (Red)</button>
+    <label for="connectionInput">Invite link or reply code</label>
+    <textarea id="connectionInput" rows="4" placeholder="Paste a link or code here"></textarea>
+    <button id="acceptOnline">Join invite / accept reply</button>
+    <label for="connectionOutput">Send this to your friend</label>
+    <textarea id="connectionOutput" rows="4" readonly></textarea>
+    <button id="copyConnection">Copy</button>
+    <p id="connectionStatus" role="status">Direct connection: some networks may require a relay, which this mode does not use.</p>
+    <button id="closeConnection">Close</button>
+    <button id="leaveOnline">Leave online game</button>
+  </dialog>
 
   <div class="overlay" id="overlay" aria-hidden="true">
     <div class="modal" role="dialog" aria-modal="true">
@@ -41,6 +65,11 @@
         <button id="closeOverlay">Close</button>
       </div>
       <div class="bigBoard" id="bigBoard"></div>
+      <div class="boardSwitchBanner" id="boardSwitchBanner" aria-live="polite"></div>
+      <div class="miniResult" id="miniResult" aria-live="assertive">
+        <div class="miniResultIcon" id="miniResultIcon"></div>
+        <div class="miniResultText" id="miniResultText"></div>
+      </div>
       <div class="footerHelp">
         <div>Click a column to drop</div>
         <div>Press Escape to close</div>
@@ -48,6 +77,8 @@
     </div>
   </div>
 
-  <script type="module" src="game.js"></script>
+  <script src="fx.js?v=8"></script>
+  <script src="online.js?v=1"></script>
+  <script src="game.js?v=9"></script>
 </body>
 </html>

@@ -1,5 +1,3 @@
-import { createFx } from "./fx.js"
-
 const META_ROWS = 6
 const META_COLS = 7
 const ROWS = 6
@@ -20,6 +18,16 @@ let aiThinking
 let selectedTile
 let overlayOpen
 let overlayTile
+let difficulty
+let aiTimer = null
+let feedbackTimer = null
+let switchBannerTimer = null
+let lastMoveTile
+let previousMoveTile
+let selectionNotice
+let selectionIsSwitch
+let moveNumber = 0
+const online = window.onlineGame
 
 const metaEl = document.getElementById("meta")
 const overlayEl = document.getElementById("overlay")
@@ -28,8 +36,13 @@ const statusEl = document.getElementById("status")
 const modalTitleEl = document.getElementById("modalTitle")
 const modalSubEl = document.getElementById("modalSub")
 const panelEl = document.getElementById("panel")
+const difficultyEl = document.getElementById("difficulty")
+const miniResultEl = document.getElementById("miniResult")
+const miniResultIconEl = document.getElementById("miniResultIcon")
+const miniResultTextEl = document.getElementById("miniResultText")
+const boardSwitchBannerEl = document.getElementById("boardSwitchBanner")
 
-const fx = createFx({
+const fx = window.createFx({
   canvas: document.getElementById("fxCanvas"),
   banner: document.getElementById("resultBanner"),
   bannerText: document.getElementById("resultText"),
@@ -63,14 +76,37 @@ function setStatus(text) {
     return
   }
   if (gameOver) return
-  if (aiThinking) {
-    statusEl.textContent = "AI thinking..."
+  if (online.active) {
+    statusEl.textContent = !online.connected ? "Online: waiting for connection…" : current === online.player ? `Your turn (${current === HUMAN ? "Red" : "Yellow"})` : `Friend's turn (${current === HUMAN ? "Red" : "Yellow"})`
     return
   }
-  statusEl.textContent = current === HUMAN ? "Your turn (Red)" : "AI turn (Yellow)"
+  if (aiThinking) {
+    statusEl.textContent = `${difficultyLabel()} computer thinking...`
+    return
+  }
+  statusEl.textContent = current === HUMAN ? "Your turn (Red)" : `${difficultyLabel()} computer's turn (Yellow)`
+}
+
+function difficultyLabel() {
+  return difficulty.charAt(0).toUpperCase() + difficulty.slice(1)
 }
 
 function newGame() {
+  if (aiTimer !== null) {
+    clearTimeout(aiTimer)
+    aiTimer = null
+  }
+  if (feedbackTimer !== null) {
+    clearTimeout(feedbackTimer)
+    feedbackTimer = null
+  }
+  if (switchBannerTimer !== null) {
+    clearTimeout(switchBannerTimer)
+    switchBannerTimer = null
+  }
+  difficulty = difficultyEl.value
+  moveNumber = 0
+  difficultyEl.disabled = online.active
   minis = Array.from({ length: META_ROWS * META_COLS }, makeMini)
 
   for (let c = 0; c < META_COLS; c++) {
@@ -83,10 +119,16 @@ function newGame() {
   selectedTile = rcToIdx(META_ROWS - 1, 0)
   overlayOpen = false
   overlayTile = selectedTile
+  lastMoveTile = null
+  previousMoveTile = null
+  selectionNotice = "Choose any highlighted board"
+  selectionIsSwitch = false
 
   overlayEl.classList.remove("open")
   overlayEl.setAttribute("aria-hidden", "true")
   panelEl.classList.remove("flipLose")
+  miniResultEl.className = "miniResult"
+  boardSwitchBannerEl.className = "boardSwitchBanner"
   fx.stop()
 
   renderAll()
@@ -189,11 +231,11 @@ function resetMini(mini) {
 
 function endMetaWin(owner) {
   gameOver = true
-  if (owner === OWN_HUMAN) {
+  if (owner === (online.active ? online.player : OWN_HUMAN)) {
     setStatus("You win the meta game!")
     fx.showWin(20000)
   } else {
-    setStatus("AI wins the meta game!")
+    setStatus(online.active ? "Your friend wins the meta game!" : "AI wins the meta game!")
     fx.showLose()
   }
 }
@@ -213,18 +255,74 @@ function finalizeMiniWin(tileIndex, owner) {
 
 function openOverlay(i) {
   if (!isMetaPlayable(i)) return
+  selectionIsSwitch = false
+  if (lastMoveTile === null) {
+    selectionNotice = "First move — choose a column"
+  } else if (i !== lastMoveTile) {
+    const last = idxToRC(lastMoveTile)
+    const next = idxToRC(i)
+    const chooser = online.active ? (current === online.player ? "You" : "Your friend") : current === HUMAN ? "You" : "Computer"
+    selectionNotice = `${chooser} switched: Board C${last.c + 1}/R${last.r + 1} → Board C${next.c + 1}/R${next.r + 1}`
+    selectionIsSwitch = true
+  } else {
+    selectionNotice = "Continuing on the last-played board"
+  }
   overlayOpen = true
   overlayTile = i
   selectedTile = i
   overlayEl.classList.add("open")
   overlayEl.setAttribute("aria-hidden", "false")
   renderAll()
+  if (selectionIsSwitch) showBoardSwitchBanner(selectionNotice)
 }
 
 function closeOverlay() {
   overlayOpen = false
   overlayEl.classList.remove("open")
   overlayEl.setAttribute("aria-hidden", "true")
+  boardSwitchBannerEl.className = "boardSwitchBanner"
+  if (switchBannerTimer !== null) {
+    clearTimeout(switchBannerTimer)
+    switchBannerTimer = null
+  }
+}
+
+function showBoardSwitchBanner(message) {
+  if (switchBannerTimer !== null) clearTimeout(switchBannerTimer)
+  boardSwitchBannerEl.textContent = message
+  boardSwitchBannerEl.className = "boardSwitchBanner show"
+  switchBannerTimer = setTimeout(() => {
+    boardSwitchBannerEl.className = "boardSwitchBanner"
+    switchBannerTimer = null
+  }, 1800)
+}
+
+function showMiniResult(owner, isDraw = false) {
+  boardSwitchBannerEl.className = "boardSwitchBanner"
+  if (switchBannerTimer !== null) {
+    clearTimeout(switchBannerTimer)
+    switchBannerTimer = null
+  }
+  miniResultEl.className = "miniResult show"
+  if (isDraw) {
+    miniResultEl.classList.add("draw")
+    miniResultIconEl.textContent = "↻"
+    miniResultTextEl.textContent = "Draw — board reset"
+  } else if (owner === OWN_HUMAN) {
+    miniResultEl.classList.add("human")
+    miniResultIconEl.textContent = "✓"
+    miniResultTextEl.textContent = online.active ? "Red claimed this board!" : "Board claimed — yours!"
+  } else {
+    miniResultEl.classList.add("computer")
+    miniResultIconEl.textContent = "!"
+    miniResultTextEl.textContent = online.active ? "Yellow claimed this board!" : "Computer claimed this board"
+  }
+
+  feedbackTimer = setTimeout(() => {
+    miniResultEl.className = "miniResult"
+    feedbackTimer = null
+    if (!gameOver) closeOverlay()
+  }, 1050)
 }
 
 function applyMoveToMini(grid, col, player) {
@@ -289,28 +387,6 @@ function evaluateMove(tileIndex, col, player) {
   return score
 }
 
-function applyHypotheticalStateForWonTile(tileIndex, owner) {
-  const m = ownersMatrixWithOverride(tileIndex, owner)
-  const rc = idxToRC(tileIndex)
-  return { m, rc }
-}
-
-function humanMetaWinThreatScore() {
-  const metaMoves = validMetaMoves()
-  let best = -Infinity
-
-  for (const t of metaMoves) {
-    const mini = minis[t]
-    const winCols = miniImmediateWinCols(mini.grid, HUMAN)
-    if (!winCols.length) continue
-
-    const { m, rc } = applyHypotheticalStateForWonTile(t, OWN_HUMAN)
-    if (isWinMeta(m, rc.r, rc.c, OWN_HUMAN)) best = Math.max(best, 80000)
-  }
-
-  return best === -Infinity ? 0 : best
-}
-
 function validMetaMoves() {
   const moves = []
   for (let i = 0; i < minis.length; i++) {
@@ -319,105 +395,157 @@ function validMetaMoves() {
   return moves
 }
 
-function bestHumanReplyScore(simMinis, simPlayable) {
-  let best = -Infinity
+function legalMoves(state = minis) {
+  const moves = []
+  for (let t = 0; t < state.length; t++) {
+    const mini = state[t]
+    if (!mini.playable || mini.locked || mini.owner !== OWN_NONE) continue
+    for (const c of validColsForMini(mini.grid)) moves.push({ t, c })
+  }
+  return moves
+}
 
-  for (let i = 0; i < simMinis.length; i++) {
-    if (!simPlayable[i]) continue
-    const mini = simMinis[i]
-    const cols = validColsForMini(mini.grid)
-    for (const c of cols) {
-      const applied = applyMoveToMini(mini.grid, c, HUMAN)
-      if (!applied) continue
+function ownersMatrixFor(state) {
+  return Array.from({ length: META_ROWS }, (_, r) =>
+    Array.from({ length: META_COLS }, (_, c) => state[rcToIdx(r, c)].owner)
+  )
+}
 
-      let s = 0
-      s += metaCenterScore(i) * 3
-      s += (7 - Math.abs(c - 3)) * 2
+function simulateMove(state, move, player) {
+  const next = state.map(m => ({ ...m, grid: cloneGrid(m.grid) }))
+  const mini = next[move.t]
+  const applied = applyMoveToMini(mini.grid, move.c, player)
+  if (!applied) return null
 
-      const winMini = isWinMini(applied.grid, applied.row, c, HUMAN)
-      if (winMini) s += 2500
+  mini.grid = applied.grid
+  let metaWinner = OWN_NONE
+  if (isWinMini(mini.grid, applied.row, move.c, player)) {
+    mini.owner = player === AI ? OWN_AI : OWN_HUMAN
+    mini.locked = true
+    mini.playable = false
+    const rc = idxToRC(move.t)
+    if (rc.r > 0) {
+      const above = next[rcToIdx(rc.r - 1, rc.c)]
+      if (above.owner === OWN_NONE && !above.locked) above.playable = true
+    }
+    if (isWinMeta(ownersMatrixFor(next), rc.r, rc.c, mini.owner)) metaWinner = mini.owner
+  } else if (isDrawMini(mini.grid)) {
+    mini.grid = Array.from({ length: ROWS }, () => Array(COLS).fill(EMPTY))
+  }
+  return { state: next, metaWinner }
+}
 
-      if (winMini) {
-        const m = ownersMatrixWithOverride(i, OWN_HUMAN)
-        const rc = idxToRC(i)
-        if (isWinMeta(m, rc.r, rc.c, OWN_HUMAN)) s += 1000000
+function scoreWindows(grid, rows, cols, aiPiece, humanPiece, weights) {
+  let score = 0
+  const directions = [[0, 1], [1, 0], [1, 1], [1, -1]]
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      for (const [dr, dc] of directions) {
+        const endR = r + dr * 3
+        const endC = c + dc * 3
+        if (endR < 0 || endR >= rows || endC < 0 || endC >= cols) continue
+        let aiCount = 0
+        let humanCount = 0
+        for (let k = 0; k < 4; k++) {
+          const value = grid[r + dr * k][c + dc * k]
+          if (value === aiPiece) aiCount++
+          if (value === humanPiece) humanCount++
+        }
+        if (!humanCount) score += weights[aiCount]
+        if (!aiCount) score -= weights[humanCount] * 1.12
       }
-
-      best = Math.max(best, s)
     }
   }
+  return score
+}
 
-  return best === -Infinity ? 0 : best
+function evaluateState(state) {
+  const owners = ownersMatrixFor(state)
+  let score = scoreWindows(owners, META_ROWS, META_COLS, OWN_AI, OWN_HUMAN, [0, 30, 220, 1800, 1000000])
+
+  for (let i = 0; i < state.length; i++) {
+    const mini = state[i]
+    if (mini.owner === OWN_AI) score += 1100 + metaCenterScore(i) * 8
+    if (mini.owner === OWN_HUMAN) score -= 1230 + metaCenterScore(i) * 8
+    if (mini.owner !== OWN_NONE || !mini.playable) continue
+    score += scoreWindows(mini.grid, ROWS, COLS, AI, HUMAN, [0, 2, 15, 130, 3000])
+    for (let r = 0; r < ROWS; r++) {
+      if (mini.grid[r][3] === AI) score += 4
+      if (mini.grid[r][3] === HUMAN) score -= 4
+    }
+  }
+  return score
+}
+
+function randomMove(moves) {
+  return moves[Math.floor(Math.random() * moves.length)]
+}
+
+function chooseMediumMove(moves) {
+  const ranked = moves.map(move => {
+    const mini = minis[move.t]
+    let score = evaluateMove(move.t, move.c, AI)
+    if (miniImmediateWinCols(mini.grid, HUMAN).includes(move.c)) {
+      score += 1800
+      const rc = idxToRC(move.t)
+      const threatenedOwners = ownersMatrixWithOverride(move.t, OWN_HUMAN)
+      if (isWinMeta(threatenedOwners, rc.r, rc.c, OWN_HUMAN)) score += 2000000
+    }
+    score += Math.random() * 80
+    return { move, score }
+  }).sort((a, b) => b.score - a.score)
+
+  // Occasionally choose another good move so Medium stays beatable.
+  const pool = ranked.slice(0, Math.min(3, ranked.length))
+  return Math.random() < 0.82 ? ranked[0].move : randomMove(pool).move
+}
+
+function chooseHardMove(moves) {
+  let bestScore = -Infinity
+  let bestMoves = []
+
+  for (const move of moves) {
+    const result = simulateMove(minis, move, AI)
+    if (!result) continue
+    let score
+
+    if (result.metaWinner === OWN_AI) {
+      score = 100000000
+    } else {
+      const replies = legalMoves(result.state)
+      let worstReply = Infinity
+      for (const reply of replies) {
+        const response = simulateMove(result.state, reply, HUMAN)
+        if (!response) continue
+        const replyScore = response.metaWinner === OWN_HUMAN
+          ? -100000000
+          : evaluateState(response.state)
+        worstReply = Math.min(worstReply, replyScore)
+      }
+      score = worstReply === Infinity ? evaluateState(result.state) : worstReply
+      score += metaCenterScore(move.t) * 0.01 + (7 - Math.abs(move.c - 3)) * 0.001
+    }
+
+    if (score > bestScore + 0.0001) {
+      bestScore = score
+      bestMoves = [move]
+    } else if (Math.abs(score - bestScore) <= 0.0001) {
+      bestMoves.push(move)
+    }
+  }
+  return randomMove(bestMoves)
 }
 
 function aiChooseMove() {
-  const metaMoves = validMetaMoves()
-  let best = null
-  let bestScore = -Infinity
-
-  const threat = humanMetaWinThreatScore()
-
-  for (const t of metaMoves) {
-    const mini = minis[t]
-    const cols = validColsForMini(mini.grid)
-
-    for (const c of cols) {
-      const base = evaluateMove(t, c, AI)
-      if (base === -Infinity) continue
-
-      let score = base
-
-      if (threat > 0) {
-        const oppWinCols = miniImmediateWinCols(mini.grid, HUMAN)
-        if (oppWinCols.length) score += 900
-      }
-
-      const simMinis = minis.map(m => ({ ...m, grid: cloneGrid(m.grid) }))
-      const simPlayable = minis.map(m => isMetaPlayableSim(m))
-
-      function isMetaPlayableSim(mm) {
-        return mm.playable && !mm.locked && mm.owner === OWN_NONE
-      }
-
-      const applied = applyMoveToMini(simMinis[t].grid, c, AI)
-      if (applied) {
-        simMinis[t].grid = applied.grid
-      }
-
-      const winMini = applied ? isWinMini(applied.grid, applied.row, c, AI) : false
-      if (winMini) {
-        simMinis[t].owner = OWN_AI
-        simMinis[t].locked = true
-        simMinis[t].playable = false
-        const rc = idxToRC(t)
-        const aboveR = rc.r - 1
-        if (aboveR >= 0) {
-          const aboveIdx = rcToIdx(aboveR, rc.c)
-          if (simMinis[aboveIdx].owner === OWN_NONE && !simMinis[aboveIdx].locked) simMinis[aboveIdx].playable = true
-        }
-      } else if (applied && isDrawMini(applied.grid)) {
-        simMinis[t].grid = Array.from({ length: ROWS }, () => Array(COLS).fill(EMPTY))
-      }
-
-      const humanBest = bestHumanReplyScore(simMinis, simPlayable)
-      score -= humanBest * 0.9
-
-      if (score > bestScore) {
-        bestScore = score
-        best = { t, c }
-      }
-    }
-  }
-
-  if (!best) {
-    const t = metaMoves[0]
-    return { t, c: 3 }
-  }
-
-  return best
+  const moves = legalMoves()
+  if (!moves.length) return null
+  if (difficulty === "easy") return randomMove(moves)
+  if (difficulty === "medium") return chooseMediumMove(moves)
+  return chooseHardMove(moves)
 }
 
 function aiMove() {
+  aiTimer = null
   if (gameOver) {
     aiThinking = false
     setStatus()
@@ -433,6 +561,11 @@ function aiMove() {
   }
 
   const pick = aiChooseMove()
+  if (!pick) {
+    aiThinking = false
+    setStatus("No moves left")
+    return
+  }
 
   aiThinking = false
   current = AI
@@ -442,8 +575,10 @@ function aiMove() {
   playMove(pick.t, pick.c)
 }
 
-function playMove(tileIndex, col) {
+function playMove(tileIndex, col, remote = false) {
   if (gameOver || aiThinking) return
+  if (!Number.isInteger(tileIndex) || tileIndex < 0 || tileIndex >= minis.length || !Number.isInteger(col) || col < 0 || col >= COLS) return
+  if (online.active && (!online.connected || (remote ? current === online.player : current !== online.player))) return
   if (!isMetaPlayable(tileIndex)) return
 
   const mini = minis[tileIndex]
@@ -451,22 +586,31 @@ function playMove(tileIndex, col) {
   if (row === -1) return
 
   mini.grid[row][col] = current
+  if (online.active && !remote) online.send({ type: "move", t: tileIndex, c: col, n: moveNumber })
+  moveNumber++
+  previousMoveTile = lastMoveTile
+  lastMoveTile = tileIndex
 
+  let miniResult = null
   if (isWinMini(mini.grid, row, col, current)) {
-    finalizeMiniWin(tileIndex, current === HUMAN ? OWN_HUMAN : OWN_AI)
+    miniResult = current === HUMAN ? OWN_HUMAN : OWN_AI
+    finalizeMiniWin(tileIndex, miniResult)
   } else if (isDrawMini(mini.grid)) {
     resetMini(mini)
+    miniResult = "draw"
   }
 
   current = current === HUMAN ? AI : HUMAN
   setStatus()
   renderAll()
 
-  if (!gameOver && current === AI) {
+  if (miniResult !== null) showMiniResult(miniResult, miniResult === "draw")
+
+  if (!online.active && !gameOver && current === AI) {
     aiThinking = true
     setStatus()
     renderAll()
-    setTimeout(aiMove, 220)
+    aiTimer = setTimeout(aiMove, miniResult === null ? 220 : 1100)
   }
 }
 
@@ -480,6 +624,8 @@ function renderMeta() {
     tile.className = "tile"
 
     if (i === selectedTile) tile.classList.add("selected")
+    if (i === lastMoveTile) tile.classList.add("lastPlayed")
+    if (i === previousMoveTile && i !== lastMoveTile) tile.classList.add("previousPlayed")
     if (m.owner !== OWN_NONE) tile.classList.add("owned")
     if (!isMetaPlayable(i) && m.owner === OWN_NONE) tile.classList.add("disabled")
 
@@ -512,8 +658,32 @@ function renderMeta() {
 
     wrap.appendChild(metaDisc)
 
+    if (m.owner !== OWN_NONE) {
+      const claimLabel = document.createElement("div")
+      claimLabel.className = "claimLabel"
+      claimLabel.textContent = online.active ? (m.owner === OWN_HUMAN ? "RED" : "YELLOW") : m.owner === OWN_HUMAN ? "YOURS" : "CPU"
+      wrap.appendChild(claimLabel)
+      tile.setAttribute("aria-label", m.owner === OWN_HUMAN ? "Board claimed by you" : "Board claimed by computer")
+    }
+
     tile.appendChild(miniBoard)
     tile.appendChild(wrap)
+
+    if (i === lastMoveTile || (i === previousMoveTile && i !== lastMoveTile) || (overlayOpen && i === selectedTile && i !== lastMoveTile)) {
+      const moveBadge = document.createElement("div")
+      moveBadge.className = "moveBadge"
+      if (overlayOpen && i === selectedTile && i !== lastMoveTile) {
+        moveBadge.classList.add("chosen")
+        moveBadge.textContent = "CHOSEN"
+      } else if (i === lastMoveTile) {
+        moveBadge.classList.add("latest")
+        moveBadge.textContent = "LAST MOVE"
+      } else if (i === previousMoveTile) {
+        moveBadge.classList.add("previous")
+        moveBadge.textContent = "PREVIOUS"
+      }
+      tile.appendChild(moveBadge)
+    }
 
     tile.addEventListener("click", () => openOverlay(i))
 
@@ -530,8 +700,10 @@ function renderOverlay() {
   modalTitleEl.textContent = "Mini board col " + (rc.c + 1) + " row " + (rc.r + 1)
 
   if (gameOver) modalSubEl.textContent = "Game over"
-  else if (aiThinking) modalSubEl.textContent = "AI thinking..."
-  else modalSubEl.textContent = current === HUMAN ? "Your move" : "AI move"
+  else if (selectionNotice) modalSubEl.textContent = selectionNotice
+  else if (aiThinking) modalSubEl.textContent = `${difficultyLabel()} computer thinking...`
+  else modalSubEl.textContent = current === HUMAN ? "Your move" : "Computer move"
+  modalSubEl.classList.toggle("switchNotice", selectionIsSwitch && !gameOver)
 
   bigEl.innerHTML = ""
 
@@ -549,7 +721,7 @@ function renderOverlay() {
       cell.appendChild(disc)
 
       cell.addEventListener("click", () => {
-        if (current !== HUMAN) return
+        if (online.active ? current !== online.player : current !== HUMAN) return
         playMove(overlayTile, c)
       })
 
@@ -563,7 +735,23 @@ function renderAll() {
   renderOverlay()
 }
 
-document.getElementById("reset").addEventListener("click", newGame)
+document.getElementById("reset").addEventListener("click", () => {
+  if (online.active) {
+    if (online.player !== HUMAN || !online.connected) { setStatus("Only the connected host can start a new game"); return }
+    online.send({ type: "reset" })
+  }
+  newGame()
+})
+online.onStart = newGame
+online.onLeave = newGame
+online.onState = () => { difficultyEl.disabled = online.active; setStatus() }
+online.onReset = newGame
+online.onMove = message => {
+  if (message.n !== moveNumber || current === online.player || !Number.isInteger(message.t) || !Number.isInteger(message.c) || message.t < 0 || message.t >= minis.length || message.c < 0 || message.c >= COLS || !isMetaPlayable(message.t) || lowestEmptyRow(minis[message.t].grid, message.c) < 0) return
+  openOverlay(message.t)
+  playMove(message.t, message.c, true)
+}
+difficultyEl.addEventListener("change", newGame)
 document.getElementById("closeOverlay").addEventListener("click", closeOverlay)
 
 overlayEl.addEventListener("click", (e) => {

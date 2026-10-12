@@ -2,7 +2,7 @@ function rand(a, b) {
   return a + Math.random() * (b - a)
 }
 
-export function createFx(opts) {
+function createFx(opts) {
   const canvas = opts.canvas
   const banner = opts.banner
   const bannerText = opts.bannerText
@@ -176,3 +176,5 @@ export function createFx(opts) {
 
   return { showWin, showLose, stop }
 }
+
+window.createFx = createFx
