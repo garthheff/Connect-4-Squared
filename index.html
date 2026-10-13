@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Connect 4 of Connect 4</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <canvas id="fxCanvas"></canvas>
@@ -15,7 +15,8 @@
 
   <div class="wrap">
     <div class="top">
-      <div>
+      <div class="gameIntro">
+        <div class="brand">CONNECT <span>4²</span></div>
         <div class="status" id="status">Your turn</div>
         <div class="sub">
           Meta grid has gravity. Only bottom row is playable at first.
@@ -24,6 +25,8 @@
         </div>
       </div>
       <div class="controls">
+        <label for="theme">Style</label>
+        <select id="theme"><option value="light">Light</option><option value="dark">Dark</option><option value="colourful">Colourful</option></select>
         <label for="difficulty">Computer</label>
         <select id="difficulty">
           <option value="easy">Easy</option>
@@ -32,6 +35,7 @@
         </select>
         <button id="reset">New game</button>
         <button id="online">Online friend</button>
+        <button id="rulesButton">Rules</button>
       </div>
     </div>
 
@@ -39,6 +43,27 @@
       <div class="meta" id="meta"></div>
     </div>
   </div>
+
+  <dialog id="rulesDialog" aria-labelledby="rulesTitle">
+    <h2 id="rulesTitle">How to play Connect 4²</h2>
+    <p>Win small boards to build a winning line on the big board.</p>
+    <ol>
+      <li><strong>Choose a playable mini-board.</strong> Only the bottom row of the big board is available at the start.</li>
+      <li><strong>Drop a disc.</strong> Click a column. Your disc falls to the lowest empty slot. Red moves first; Yellow moves second.</li>
+      <li><strong>Claim a mini-board.</strong> Connect four discs of your colour horizontally, vertically, or diagonally. The board becomes your coloured tile and is locked.</li>
+      <li><strong>Unlock the board above.</strong> A claimed tile unlocks the mini-board directly above it, whichever player claimed it.</li>
+      <li><strong>Win the big board.</strong> Connect four claimed tiles of your colour horizontally, vertically, or diagonally.</li>
+    </ol>
+    <h3>Switching boards</h3>
+    <p>On each turn you can use any playable mini-board. You do not have to follow your opponent. Close the mini-board to choose another, or select <strong>Previous board</strong> to return to where you last played if it is still available.</p>
+    <h3>Draws and highlights</h3>
+    <p>A mini-board that fills without a winner resets to empty and stays playable. A white ring marks the latest disc; green outlines show winning lines. Click claimed boards to inspect their winning discs. They cannot receive further moves.</p>
+    <h3>Game modes</h3>
+    <p>Choose Easy, Medium, or Hard to play the computer. Changing difficulty starts a fresh game.</p>
+    <p>For two devices, select <strong>Online friend</strong>. The host shares an invite link, the guest returns a reply code, and the host accepts it. The host is Red and controls new games. Keep both pages open. Some networks cannot connect without a relay.</p>
+    <p>Changing themes keeps your game. <strong>New game</strong> clears all boards.</p>
+    <button id="closeRules">Got it — let's play</button>
+  </dialog>
 
   <dialog id="connectionDialog">
     <h2>Play a friend online</h2>
@@ -60,9 +85,13 @@
       <div class="modalTop">
         <div>
           <div class="modalTitle" id="modalTitle">Mini board</div>
+          <div class="turnIndicator" id="turnIndicator" role="status"></div>
           <div class="modalSub" id="modalSub">Choose a column</div>
         </div>
-        <button id="closeOverlay">Close</button>
+        <div class="modalActions">
+          <button id="backToMyBoard" disabled>Previous board</button>
+          <button id="closeOverlay">Close</button>
+        </div>
       </div>
       <div class="bigBoard" id="bigBoard"></div>
       <div class="boardSwitchBanner" id="boardSwitchBanner" aria-live="polite"></div>
@@ -79,6 +108,7 @@
 
   <script src="fx.js?v=8"></script>
   <script src="online.js?v=1"></script>
-  <script src="game.js?v=9"></script>
+  <script src="game.js?v=15"></script>
+  <script src="ui.js?v=2"></script>
 </body>
 </html>

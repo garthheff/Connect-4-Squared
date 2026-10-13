@@ -27,6 +27,9 @@ let previousMoveTile
 let selectionNotice
 let selectionIsSwitch
 let moveNumber = 0
+let lastBoardByPlayer = { 1: null, 2: null }
+let latestDisc = null
+let winningMetaTiles = new Set()
 const online = window.onlineGame
 
 const metaEl = document.getElementById("meta")
@@ -92,6 +95,9 @@ function difficultyLabel() {
 }
 
 function newGame() {
+  latestDisc = null
+  lastBoardByPlayer = { 1: null, 2: null }
+  winningMetaTiles = new Set()
   if (aiTimer !== null) {
     clearTimeout(aiTimer)
     aiTimer = null
@@ -242,6 +248,7 @@ function endMetaWin(owner) {
 
 function finalizeMiniWin(tileIndex, owner) {
   const mini = minis[tileIndex]
+  mini.winningCells = findWinningMiniCells(mini.grid, owner)
   mini.owner = owner
   mini.locked = true
   mini.playable = false
@@ -250,13 +257,53 @@ function finalizeMiniWin(tileIndex, owner) {
 
   const m = ownersMatrixWithOverride(null, null)
   const rc = idxToRC(tileIndex)
-  if (isWinMeta(m, rc.r, rc.c, owner)) endMetaWin(owner)
+  if (isWinMeta(m, rc.r, rc.c, owner)) {
+    winningMetaTiles = findWinningMetaTiles(m, rc.r, rc.c, owner)
+    endMetaWin(owner)
+  }
+}
+
+function findWinningMiniCells(grid, player) {
+  const cells = new Set()
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+        const endR = r + 3 * dr
+        const endC = c + 3 * dc
+        if (endR < 0 || endR >= ROWS || endC < 0 || endC >= COLS) continue
+        if ([0, 1, 2, 3].every(k => grid[r + k * dr][c + k * dc] === player)) {
+          for (let k = 0; k < 4; k++) cells.add((r + k * dr) * COLS + c + k * dc)
+        }
+      }
+    }
+  }
+  return cells
+}
+
+function findWinningMetaTiles(matrix, row, col, owner) {
+  const winners = new Set()
+  for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+    const line = [rcToIdx(row, col)]
+    for (const sign of [-1, 1]) {
+      let r = row + dr * sign
+      let c = col + dc * sign
+      while (r >= 0 && r < META_ROWS && c >= 0 && c < META_COLS && matrix[r][c] === owner) {
+        line.push(rcToIdx(r, c))
+        r += dr * sign
+        c += dc * sign
+      }
+    }
+    if (line.length >= 4) for (const tile of line) winners.add(tile)
+  }
+  return winners
 }
 
 function openOverlay(i) {
-  if (!isMetaPlayable(i)) return
+  if (!isMetaPlayable(i) && minis[i].owner === OWN_NONE) return
   selectionIsSwitch = false
-  if (lastMoveTile === null) {
+  if (minis[i].owner !== OWN_NONE) {
+    selectionNotice = "Claimed board — viewing the winning discs"
+  } else if (lastMoveTile === null) {
     selectionNotice = "First move — choose a column"
   } else if (i !== lastMoveTile) {
     const last = idxToRC(lastMoveTile)
@@ -278,6 +325,7 @@ function openOverlay(i) {
 
 function closeOverlay() {
   overlayOpen = false
+  renderMeta()
   overlayEl.classList.remove("open")
   overlayEl.setAttribute("aria-hidden", "true")
   boardSwitchBannerEl.className = "boardSwitchBanner"
@@ -321,7 +369,7 @@ function showMiniResult(owner, isDraw = false) {
   feedbackTimer = setTimeout(() => {
     miniResultEl.className = "miniResult"
     feedbackTimer = null
-    if (!gameOver) closeOverlay()
+    closeOverlay()
   }, 1050)
 }
 
@@ -586,6 +634,8 @@ function playMove(tileIndex, col, remote = false) {
   if (row === -1) return
 
   mini.grid[row][col] = current
+  latestDisc = { tile: tileIndex, row, col }
+  lastBoardByPlayer[current] = tileIndex
   if (online.active && !remote) online.send({ type: "move", t: tileIndex, c: col, n: moveNumber })
   moveNumber++
   previousMoveTile = lastMoveTile
@@ -616,12 +666,17 @@ function playMove(tileIndex, col, remote = false) {
 
 function renderMeta() {
   metaEl.innerHTML = ""
+  metaEl.classList.toggle("hasWinner", winningMetaTiles.size > 0)
 
   for (let i = 0; i < minis.length; i++) {
     const m = minis[i]
 
     const tile = document.createElement("div")
     tile.className = "tile"
+    if (winningMetaTiles.has(i)) {
+      tile.classList.add("winningTile")
+      tile.setAttribute("title", "Part of the winning four in a row")
+    }
 
     if (i === selectedTile) tile.classList.add("selected")
     if (i === lastMoveTile) tile.classList.add("lastPlayed")
@@ -639,6 +694,7 @@ function renderMeta() {
 
         const disc = document.createElement("div")
         disc.className = "miniDisc"
+        if (latestDisc?.tile === i && latestDisc.row === r && latestDisc.col === c && m.grid[r][c] !== EMPTY) disc.classList.add("latestDisc")
         const v = m.grid[r][c]
         if (v === HUMAN) disc.classList.add("p1")
         if (v === AI) disc.classList.add("p2")
@@ -696,24 +752,61 @@ function renderOverlay() {
 
   const mini = minis[overlayTile]
   const rc = idxToRC(overlayTile)
+  const localPlayer = online.active ? online.player : HUMAN
+  const previousBoard = lastBoardByPlayer[localPlayer]
+  const backButton = document.getElementById("backToMyBoard")
+  const canReturn = previousBoard !== null && previousBoard !== overlayTile && isMetaPlayable(previousBoard) && !gameOver
+  backButton.disabled = !canReturn
+  if (previousBoard !== null) {
+    const previous = idxToRC(previousBoard)
+    backButton.textContent = "Previous board"
+    backButton.title = canReturn ? `Return to your previous board: column ${previous.c + 1}, row ${previous.r + 1}` : "Already viewing your previous board, or it has been claimed"
+  } else {
+    backButton.textContent = "Previous board"
+    backButton.title = "Play your first move to save a board"
+  }
 
   modalTitleEl.textContent = "Mini board col " + (rc.c + 1) + " row " + (rc.r + 1)
 
-  if (gameOver) modalSubEl.textContent = "Game over"
+  const inspecting = mini.owner !== OWN_NONE
+  const turnIndicator = document.getElementById("turnIndicator")
+  turnIndicator.className = "turnIndicator"
+  if (inspecting || gameOver) {
+    turnIndicator.textContent = inspecting ? "Viewing claimed board" : "Game over"
+  } else if (online.active && !online.connected) {
+    turnIndicator.textContent = "Connection unavailable • play paused"
+  } else {
+    const yours = current === (online.active ? online.player : HUMAN)
+    turnIndicator.textContent = aiThinking ? "Computer thinking…" : yours ? "Your turn — choose a column" : online.active ? "Your friend's turn" : "Computer's turn"
+    turnIndicator.classList.add(current === HUMAN ? "redTurn" : "yellowTurn")
+  }
+  if (inspecting) modalSubEl.textContent = `${mini.owner === OWN_HUMAN ? "Red" : "Yellow"} won this board • highlighted discs form the winning line • view only`
+  else if (gameOver) modalSubEl.textContent = "Game over"
   else if (selectionNotice) modalSubEl.textContent = selectionNotice
   else if (aiThinking) modalSubEl.textContent = `${difficultyLabel()} computer thinking...`
   else modalSubEl.textContent = current === HUMAN ? "Your move" : "Computer move"
   modalSubEl.classList.toggle("switchNotice", selectionIsSwitch && !gameOver)
 
   bigEl.innerHTML = ""
+  bigEl.classList.toggle("inspecting", inspecting)
+  const help = document.querySelector(".footerHelp > div")
+  help.textContent = inspecting ? "Claimed board • no further moves" : "Click a column to drop"
 
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const cell = document.createElement("div")
       cell.className = "bigCell"
+      if (inspecting && mini.winningCells?.has(r * COLS + c)) {
+        cell.classList.add("winningCell")
+        cell.setAttribute("aria-label", "Winning disc")
+      }
 
       const disc = document.createElement("div")
       disc.className = "disc"
+      if (latestDisc?.tile === overlayTile && latestDisc.row === r && latestDisc.col === c && mini.grid[r][c] !== EMPTY) {
+        disc.classList.add("latestDisc")
+        cell.setAttribute("title", "Most recent disc played")
+      }
       const v = mini.grid[r][c]
       if (v === HUMAN) disc.classList.add("p1")
       if (v === AI) disc.classList.add("p2")
@@ -721,6 +814,7 @@ function renderOverlay() {
       cell.appendChild(disc)
 
       cell.addEventListener("click", () => {
+        if (inspecting) return
         if (online.active ? current !== online.player : current !== HUMAN) return
         playMove(overlayTile, c)
       })
@@ -753,6 +847,11 @@ online.onMove = message => {
 }
 difficultyEl.addEventListener("change", newGame)
 document.getElementById("closeOverlay").addEventListener("click", closeOverlay)
+document.getElementById("backToMyBoard").addEventListener("click", () => {
+  const player = online.active ? online.player : HUMAN
+  const tile = lastBoardByPlayer[player]
+  if (tile !== null && !gameOver && isMetaPlayable(tile)) openOverlay(tile)
+})
 
 overlayEl.addEventListener("click", (e) => {
   if (e.target === overlayEl) closeOverlay()
